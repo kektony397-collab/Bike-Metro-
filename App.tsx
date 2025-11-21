@@ -7,6 +7,12 @@ import { FareModeKey } from './types';
 const App: React.FC = () => {
   const [mode, setMode] = useState<FareModeKey>('BikeTaxi');
   
+  // Settings State for Manual Controls
+  const [settings, setSettings] = useState({
+    allowNightFare: true,
+    allowWaitingCharges: true
+  });
+
   // 1. GPS Logic
   const {
     location,
@@ -25,6 +31,7 @@ const App: React.FC = () => {
     speedKmh,
     totalDistanceKm,
     isTracking,
+    settings
   });
 
   const handleToggleTracking = () => {
@@ -80,6 +87,8 @@ const App: React.FC = () => {
           setMode={setMode}
           onToggleTracking={handleToggleTracking}
           speedKmh={speedKmh}
+          settings={settings}
+          setSettings={setSettings}
         />
       </main>
 

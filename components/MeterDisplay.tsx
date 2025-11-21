@@ -11,6 +11,14 @@ interface MeterDisplayProps {
   setMode: (mode: FareModeKey) => void;
   onToggleTracking: () => void;
   speedKmh: number;
+  settings: {
+    allowNightFare: boolean;
+    allowWaitingCharges: boolean;
+  };
+  setSettings: React.Dispatch<React.SetStateAction<{
+    allowNightFare: boolean;
+    allowWaitingCharges: boolean;
+  }>>;
 }
 
 export const MeterDisplay: React.FC<MeterDisplayProps> = ({
@@ -20,7 +28,9 @@ export const MeterDisplay: React.FC<MeterDisplayProps> = ({
   mode,
   setMode,
   onToggleTracking,
-  speedKmh
+  speedKmh,
+  settings,
+  setSettings
 }) => {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -29,6 +39,10 @@ export const MeterDisplay: React.FC<MeterDisplayProps> = ({
 
   const formatDist = (val: number) => `${val.toFixed(2)} km`;
   const formatTime = (val: number) => `${Math.floor(val)}m ${Math.round((val % 1) * 60)}s`;
+
+  const toggleSetting = (key: 'allowNightFare' | 'allowWaitingCharges') => {
+    setSettings(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   if (!isGPSReady && isTracking) {
      // Initial acquiring state
@@ -45,7 +59,7 @@ export const MeterDisplay: React.FC<MeterDisplayProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full w-full max-w-md mx-auto relative pb-24">
+    <div className="flex flex-col h-full w-full max-w-md mx-auto relative pb-28">
       
       {/* Mode Selector */}
       <div className="p-4">
@@ -54,6 +68,37 @@ export const MeterDisplay: React.FC<MeterDisplayProps> = ({
             onChange={setMode} 
             disabled={isTracking}
         />
+      </div>
+
+      {/* Settings Toggles */}
+      <div className="flex gap-3 px-4 mb-2">
+        <button
+            onClick={() => toggleSetting('allowWaitingCharges')}
+            className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                settings.allowWaitingCharges 
+                ? 'bg-md-sys-color-secondaryContainer text-md-sys-color-onSecondaryContainer border-transparent'
+                : 'border-md-sys-color-outline text-md-sys-color-outline'
+            }`}
+        >
+            <span className="material-symbols-rounded text-sm">
+                {settings.allowWaitingCharges ? 'timer' : 'timer_off'}
+            </span>
+            Wait Charge: {settings.allowWaitingCharges ? 'ON' : 'OFF'}
+        </button>
+        
+        <button
+            onClick={() => toggleSetting('allowNightFare')}
+            className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                settings.allowNightFare 
+                ? 'bg-indigo-900/50 text-indigo-200 border-indigo-700'
+                : 'border-md-sys-color-outline text-md-sys-color-outline'
+            }`}
+        >
+            <span className="material-symbols-rounded text-sm">
+                {settings.allowNightFare ? 'bedtime' : 'sunny'}
+            </span>
+            Night Fare: {settings.allowNightFare ? 'ON' : 'OFF'}
+        </button>
       </div>
 
       {/* Main Fare Display */}
@@ -66,23 +111,30 @@ export const MeterDisplay: React.FC<MeterDisplayProps> = ({
         </div>
         
         {/* Status Badge */}
-        <div className={`
-            px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1
-            ${fareDetails.status.isMoving 
-                ? 'bg-green-900/30 text-green-400 border border-green-800' 
-                : 'bg-yellow-900/30 text-yellow-400 border border-yellow-800'}
-        `}>
-            <span className="material-symbols-rounded text-sm">
-                {fareDetails.status.isMoving ? 'speed' : 'timer'}
-            </span>
-            {fareDetails.status.isMoving ? 'MOVING' : 'WAITING'} 
-            <span className="ml-1 opacity-75">({speedKmh.toFixed(1)} km/h)</span>
-        </div>
-        
-        {fareDetails.status.isNightTime && (
+        {isTracking ? (
+            <div className={`
+                px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1
+                ${fareDetails.status.isMoving 
+                    ? 'bg-green-900/30 text-green-400 border border-green-800' 
+                    : 'bg-yellow-900/30 text-yellow-400 border border-yellow-800'}
+            `}>
+                <span className="material-symbols-rounded text-sm">
+                    {fareDetails.status.isMoving ? 'speed' : 'timer'}
+                </span>
+                {fareDetails.status.isMoving ? 'MOVING' : 'WAITING'} 
+                <span className="ml-1 opacity-75">({speedKmh.toFixed(1)} km/h)</span>
+            </div>
+        ) : (
+            <div className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 bg-md-sys-color-surfaceVariant text-md-sys-color-onSurfaceVariant">
+                 Ready to Start
+            </div>
+        )}
+
+        {/* Notification if Night Fare is enabled but not active due to time, or active */}
+        {settings.allowNightFare && fareDetails.status.isNightTime && (
              <div className="mt-2 text-xs text-md-sys-color-tertiary flex items-center gap-1">
                  <span className="material-symbols-rounded text-sm">bedtime</span>
-                 Night Surcharge Active
+                 Night Surcharge Applied
              </div>
         )}
       </div>
@@ -130,11 +182,11 @@ export const MeterDisplay: React.FC<MeterDisplayProps> = ({
                      <span>{formatCurrency(fareDetails.breakdown.timeFare)}</span>
                  </div>
                  <div className="flex justify-between">
-                     <span className="text-md-sys-color-onSurfaceVariant">Waiting</span>
+                     <span className="text-md-sys-color-onSurfaceVariant">Waiting {settings.allowWaitingCharges ? '' : '(OFF)'}</span>
                      <span>{formatCurrency(fareDetails.breakdown.waitingFare)}</span>
                  </div>
                  <div className="flex justify-between text-md-sys-color-tertiary">
-                     <span>Night Surcharge</span>
+                     <span>Night Surcharge {settings.allowNightFare ? '' : '(OFF)'}</span>
                      <span>{formatCurrency(fareDetails.breakdown.nightSurcharge)}</span>
                  </div>
                  <div className="flex justify-between pt-2 border-t border-md-sys-color-outline/20">

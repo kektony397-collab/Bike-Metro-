@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { FareModeKey, FareDetails } from '../types';
 import { FARE_MATRIX } from '../constants';
 import { isNightTime } from '../utils/geo';
@@ -8,6 +8,10 @@ interface UseFareMeterProps {
   speedKmh: number;
   totalDistanceKm: number;
   isTracking: boolean;
+  settings: {
+    allowNightFare: boolean;
+    allowWaitingCharges: boolean;
+  }
 }
 
 // Threshold to switch between waiting and moving state
@@ -19,10 +23,12 @@ export const useFareMeter = ({
   speedKmh,
   totalDistanceKm,
   isTracking,
+  settings
 }: UseFareMeterProps) => {
   // Time tracking (in seconds)
   const [movingTimeSec, setMovingTimeSec] = useState(0);
   const [waitingTimeSec, setWaitingTimeSec] = useState(0);
+  const [hasStarted, setHasStarted] = useState(false);
   
   const config = FARE_MATRIX[mode];
 
@@ -30,6 +36,7 @@ export const useFareMeter = ({
   useEffect(() => {
     let interval: number;
     if (isTracking) {
+      setHasStarted(true);
       interval = window.setInterval(() => {
         if (speedKmh > MOVING_SPEED_THRESHOLD_KMH) {
           setMovingTimeSec((prev) => prev + 1);
@@ -41,40 +48,57 @@ export const useFareMeter = ({
     return () => clearInterval(interval);
   }, [isTracking, speedKmh]);
 
-  // Reset when tracking stops (optional, currently we preserve state until reset explicitly)
+  // Reset when tracking stops
   const resetMeter = () => {
     setMovingTimeSec(0);
     setWaitingTimeSec(0);
+    setHasStarted(false);
   };
 
   // Calculation Logic
   const fareDetails: FareDetails = useMemo(() => {
+    // If the ride hasn't really started (no tracking history), show 0
+    if (!hasStarted && totalDistanceKm === 0 && movingTimeSec === 0 && waitingTimeSec === 0) {
+       return {
+        totalCustomerFare: 0,
+        netDriverPayout: 0,
+        breakdown: {
+          baseFare: 0,
+          distanceFare: 0,
+          timeFare: 0,
+          waitingFare: 0,
+          nightSurcharge: 0,
+          platformFee: 0,
+          commission: 0,
+        },
+        status: {
+          isMoving: false,
+          isNightTime: false,
+          totalDistanceKm: 0,
+          totalMovingMin: 0,
+          totalWaitingMin: 0,
+        }
+       };
+    }
+
     // 1. Calculate Distance Fare (Tiered)
     let remainingDist = totalDistanceKm;
     let calculatedDistanceFare = 0;
     
-    // Sort tiers by km just in case, though config should be sorted
     const tiers = [...config.distance_tiers].sort((a, b) => a.km - b.km);
-    
     let previousTierKm = 0;
     
     for (const tier of tiers) {
       if (remainingDist <= 0) break;
-      
-      // The span of this tier
       const tierSpan = tier.km - previousTierKm;
-      
-      // How much of our distance falls into this tier
       const distInTier = Math.min(remainingDist, tierSpan);
       
       if (distInTier > 0) {
         calculatedDistanceFare += distInTier * tier.rate;
         remainingDist -= distInTier;
       }
-      
       previousTierKm = tier.km;
     }
-    // If there is still distance remaining (exceeding max tier defined), use the last tier rate
     if (remainingDist > 0 && tiers.length > 0) {
         calculatedDistanceFare += remainingDist * tiers[tiers.length - 1].rate;
     }
@@ -87,19 +111,20 @@ export const useFareMeter = ({
     const totalWaitingMin = waitingTimeSec / 60;
     const chargeableWaitMin = Math.max(0, totalWaitingMin - config.wait_threshold_min);
     const rawWaitFare = chargeableWaitMin * config.wait_rate_per_min;
-    const waitingFare = Math.min(rawWaitFare, config.wait_max_cap);
+    // Apply waiting charge ONLY if setting is enabled
+    const waitingFare = settings.allowWaitingCharges 
+        ? Math.min(rawWaitFare, config.wait_max_cap) 
+        : 0;
 
     // 4. Night Surcharge
-    // Check if current time is night time
-    const isNight = isNightTime(config.night_fare_start, config.night_fare_end);
+    const isNightTimeCheck = isNightTime(config.night_fare_start, config.night_fare_end);
+    // Apply Night Surcharge ONLY if setting is enabled AND it is night time
+    const shouldApplyNightFare = settings.allowNightFare && isNightTimeCheck;
     
-    // Surcharge applies to Base + Distance + Time (usually waiting is excluded or included depending on specific local rules, 
-    // but prompt says: "Night Fare surcharge applies to the Base, Time, and Distance Fares")
     const subTotalForSurcharge = config.base_fare + calculatedDistanceFare + timeFare;
-    const nightSurcharge = isNight ? subTotalForSurcharge * 0.20 : 0;
+    const nightSurcharge = shouldApplyNightFare ? subTotalForSurcharge * 0.20 : 0;
 
     // 5. Totals
-    // Total Customer = Base + Distance + Time + Wait + Night + Platform
     const totalCustomerFare = 
       config.base_fare + 
       calculatedDistanceFare + 
@@ -109,9 +134,6 @@ export const useFareMeter = ({
       config.platform_fee;
 
     // 6. Driver Payout
-    // Commission is percentage of (Order + Surge + Night Fare) usually excludes platform fee
-    // "applied as a percentage of the total collected fare (Order + Surge + Night Fare)"
-    // Interpreting "Order" as Base + Distance + Time + Wait
     const fareSubjectToCommission = 
       config.base_fare + 
       calculatedDistanceFare + 
@@ -120,8 +142,6 @@ export const useFareMeter = ({
       nightSurcharge;
       
     const commission = fareSubjectToCommission * config.commission_rate;
-    
-    // Net Payout = Total Collected - Commission - Platform Fee (Platform fee goes to platform)
     const netDriverPayout = totalCustomerFare - commission - config.platform_fee;
 
     return {
@@ -138,13 +158,13 @@ export const useFareMeter = ({
       },
       status: {
         isMoving: speedKmh > MOVING_SPEED_THRESHOLD_KMH,
-        isNightTime: isNight,
+        isNightTime: isNightTimeCheck,
         totalDistanceKm,
         totalMovingMin,
         totalWaitingMin,
       }
     };
-  }, [config, totalDistanceKm, movingTimeSec, waitingTimeSec]);
+  }, [config, totalDistanceKm, movingTimeSec, waitingTimeSec, settings, hasStarted, speedKmh]);
 
   return { fareDetails, resetMeter };
 };
