@@ -1,0 +1,7 @@
+{
+  "name": "Copy of BikeMeter Pro",
+  "description": "A professional-grade, MD3-compliant Progressive Web Application for tracking bike taxi fares with real-time GPS, complex tiered pricing, and night surcharge logic.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
